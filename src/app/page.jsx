@@ -14,7 +14,7 @@ export default function Home() {
   return (
     <div>
       <h1>
-        GradeBook
+        GradeBook h1
       </h1>
     </div>
   );
