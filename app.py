@@ -245,11 +245,11 @@ def saveAssignment(user):
 @verifyTeacherAuth
 def addClass(user):
     data = json.loads(request.data.decode("utf-8"))
-    class_code = data.get("class_code")
+    class_code = secrets.token_urlsafe(6)
     class_name = data.get("class_name")
 
-    if class_code is None or class_name is None:
-        return Response('{"error":"Empty class code OR class name"', status=400)
+    if class_name is None:
+        return Response('{"error":"Empty class name"', status=400)
 
     with mydb_pool.get_connection() as mydb:
         cur = mydb.cursor()
@@ -257,7 +257,7 @@ def addClass(user):
                     (user, class_code, class_name))
         mydb.commit()
         cur.close()
-        return Response(status=200)
+        return Response(class_code,status=200)
 
 
 @app.route('/teacher/class/delete', methods=["POST"])
