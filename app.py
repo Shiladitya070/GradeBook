@@ -6,6 +6,7 @@ import secrets
 import AssignmentForm
 import os
 from pathlib import Path
+from functools import wraps
 
 with open("config.json", "r") as file:
     config = json.load(file)
@@ -70,14 +71,14 @@ def getClassCodeFromUser(user) -> list | bool:
 
 
 def verifyTeacherAuth(func):
-    def wrapper():
+    def wrapper(*args, **kwargs):
         user = getUserFromToken(request.cookies.get("auth"))
         role = getRoleFromUser(user)
 
         if not user or role != TEACHER:
             return Response('{"error":"Bad creds"}', status=401)
 
-        func(user)
+        func(user, *args, **kwargs)
 
     return wrapper
 
