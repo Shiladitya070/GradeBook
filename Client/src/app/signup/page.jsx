@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import toast from 'react-hot-toast';
 import { backend_url } from '../../../config';
 import { useRouter } from 'next/navigation';
+import { useCookies } from 'react-cookie';
 
 
 const SignupPage = () => {
@@ -11,6 +12,7 @@ const SignupPage = () => {
     const [password, setPassword] = useState("");
     const [formRole, setFormRole] = useState("");
     const roleArr = ["student", "teacher", "admin"]
+    const [cookies, setCookie, removeCookie] = useCookies(['auth']);
 
     const router = useRouter()
     const handleSubmit = async (e) => {
@@ -30,6 +32,8 @@ const SignupPage = () => {
             const res = await axios.post(`${backend_url}/register`, sentData)
             if (res.status === 200) {
                 toast.success("User created successfully")
+                console.log(res.data)
+                setCookie("auth", res.data, { path: "/" });
                 // router.push("/dasboard")
             }
         } catch (error) {

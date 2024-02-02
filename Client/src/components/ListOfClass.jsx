@@ -5,8 +5,8 @@ import { useState } from 'react'
 
 function ListOfClass({ teacher }) {
     const router = useRouter()
-    const { id, name } = teacher.
-        const[classes, setClasses] = useState([{ className: "Mathematics", classCode: "MATH101" }, { className: "Physics", classCode: "PHY101" }])
+    const { id, name } = teacher
+    const [classes, setClasses] = useState([{ className: "Mathematics", classCode: "MATH101" }, { className: "Physics", classCode: "PHY101" }])
     return (
         <div className="max-w-lg mx-auto mt-8">
             <h2 className="text-2xl font-bold mb-4">Classes Taught by {name}</h2>

@@ -40,6 +40,7 @@ def getUserFromToken(token) -> str | bool:
         cur = mydb.cursor()
         cur.execute("SELECT user FROM tokens WHERE token = %s", (token,))
         row = cur.fetchone()
+        cur.close()
 
         if row is None:
             return False
@@ -53,6 +54,7 @@ def getRoleFromUser(user) -> str | bool:
         cur = mydb.cursor()
         cur.execute("SELECT role FROM userbase WHERE username=%s", (user,))
         row = cur.fetchone()
+        cur.close()
 
         if row is None:
             return False
@@ -107,7 +109,7 @@ def getAssignmentsDoneByStudent(student) -> list:
 def verifyRoleAuth(func, role_to_check):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        user = getUserFromToken(request.cookies.get("auth"))
+        user = getUserFromToken(request.headers.get('Authorization'))
         role = getRoleFromUser(user)
 
         if not user or role != role_to_check:
@@ -127,7 +129,7 @@ def verifyLogin():
     data = json.loads(request.data.decode('utf-8'))
     username = data.get("username")
     password = data.get("password")
-    role = data.get("role")
+    role = getRoleFromUser(username)
 
     with mydb_pool.get_connection() as mydb:
         cur = mydb.cursor()
@@ -143,8 +145,7 @@ def verifyLogin():
             token = genToken()
             saveToken(username, token)
 
-            resp = make_response()
-            resp.set_cookie("auth", token)
+            resp = make_response(token)
             return resp
         else:
             return Response(status=401)
@@ -176,8 +177,15 @@ def registerUser():
         saveToken(username, token)
 
         resp = make_response(token)
-        resp.set_cookie("auth", token)
         return resp
+
+
+@app.route('/profile')
+def profile():
+    username = getUserFromToken(request.headers.get("Authorization"))
+    role = getRoleFromUser(username)
+
+    return jsonify({"username": username, "role": role})
 
 
 @app.route('/student/class/list', methods=["GET"])
@@ -257,7 +265,7 @@ def addClass(user):
                     (user, class_code, class_name))
         mydb.commit()
         cur.close()
-        return Response(class_code,status=200)
+        return Response(class_code, status=200)
 
 
 @app.route('/teacher/class/delete', methods=["POST"])

@@ -2,10 +2,17 @@
 import axios from "axios";
 import { useEffect } from "react";
 import { backend_url } from "../../config";
+import { useCookies } from "react-cookie";
+
 
 export default function Home() {
+
+  const [cookies, setCookie, removeCookie] = useCookies();
+
   const fn = async () => {
-    const res = await axios.get(`${backend_url}/ping`)
+    // const ping = await axios.get(`${backend_url}/ping`);
+    // console.log("❤️", ping.data)
+    const res = await axios.get(`${backend_url}/profile`, { headers: { Authorization: `${cookies.auth}` } });
     console.log(res.data)
   }
   useEffect(() => {

@@ -1,6 +1,7 @@
 
-import CreateClass from '@/components/CreateClass';
-import ListOfClass from '@/components/ListOfClass';
+
+import ListOfClass from '../../components/ListOfClass';
+import CreateClass from '../../components/CreateClass';
 
 function Teacher() {
 
