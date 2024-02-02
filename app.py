@@ -1,4 +1,4 @@
-from flask import Flask, request, make_response, Response
+from flask import Flask, request, make_response, Response, jsonify
 from flask_cors import CORS
 import mysql.connector
 import json
@@ -6,7 +6,8 @@ import secrets
 import AssignmentForm
 import os
 from pathlib import Path
-from functools import wraps
+from functools import partial, wraps
+import uuid
 
 with open("config.json", "r") as file:
     config = json.load(file)
@@ -15,6 +16,7 @@ app = Flask(__name__)
 cors = CORS(app)
 app.secret_key = "A_SECRET_KEY"
 TEACHER = "teacher"
+STUDENT = "student"
 
 mydb_pool = mysql.connector.pooling.MySQLConnectionPool(pool_name="pool", pool_size=25, host="localhost",
                                                         username=config["dbuser"],
@@ -58,7 +60,7 @@ def getRoleFromUser(user) -> str | bool:
         return row[0]
 
 
-def getClassCodeFromUser(user) -> list | bool:
+def getClassCodeFromTeacher(user) -> list | bool:
     with mydb_pool.get_connection() as mydb:
         cur = mydb.cursor()
         cur.execute("SELECT classCode FROM classownership WHERE teacher=%s", (user,))
@@ -70,17 +72,54 @@ def getClassCodeFromUser(user) -> list | bool:
         return row
 
 
-def verifyTeacherAuth(func):
+def getClassCodeFromStudent(user) -> list | bool:
+    with mydb_pool.get_connection() as mydb:
+        cur = mydb.cursor()
+        cur.execute("SELECT classCode FROM classjoined WHERE user=%s", (user,))
+        row = cur.fetchall()
+
+        if row is None:
+            return False
+
+        return row
+
+
+def getAssignmentsFromClass(code) -> list:
+    to_return = []
+
+    for element in Path(os.getcwd()).joinpath("assignment").joinpath(code).iterdir():
+        if element.is_file():
+            to_return.append(element.name)
+
+    return to_return
+
+
+def getAssignmentsDoneByStudent(student) -> list:
+    to_return = []
+
+    for element in Path(os.getcwd()).joinpath("submission").joinpath(student).iterdir():
+        if element.is_file():
+            to_return.append(element.name)
+
+    return to_return
+
+
+def verifyRoleAuth(func, role_to_check):
+    @wraps(func)
     def wrapper(*args, **kwargs):
         user = getUserFromToken(request.cookies.get("auth"))
         role = getRoleFromUser(user)
 
-        if not user or role != TEACHER:
+        if not user or role != role_to_check:
             return Response('{"error":"Bad creds"}', status=401)
 
         func(user, *args, **kwargs)
 
     return wrapper
+
+
+verifyTeacherAuth = partial(verifyRoleAuth, role_to_check=TEACHER)
+verifyStudentAuth = partial(verifyRoleAuth, role_to_check=STUDENT)
 
 
 @app.route('/cred/verify', methods=["POST"])
@@ -141,38 +180,70 @@ def registerUser():
         return resp
 
 
+@app.route('/student/class/list', methods=["GET"])
+@verifyStudentAuth
+def listClassStudent(user):
+    return getClassCodeFromStudent(user)
+
+
+@app.route('/student/assignment/pending/all', methods=["GET"])
+@verifyStudentAuth
+def allPending(user):
+    class_codes: list = getClassCodeFromStudent(user)
+    done_assignments: list = getAssignmentsDoneByStudent(user)
+
+    all_pending = []
+
+    for class_code in class_codes:
+        assignments = getAssignmentsFromClass(class_code)
+        all_pending.append(list(set(assignments) - set(done_assignments)))
+
+    return jsonify(all_pending)
+
+
+@app.route('/student/assignment/pending/<int:class_code>', methods=["GET"])
+@verifyStudentAuth
+def specificPending(user, class_code):
+    done_assignments: list = getAssignmentsDoneByStudent(user)
+
+    all_pending = []
+    assignments = getAssignmentsFromClass(class_code)
+    all_pending.append(list(set(assignments) - set(done_assignments)))
+
+    return jsonify(all_pending)
+
+
+# TODO - assign to that students
 @app.route('/teacher/assignment/create', methods=["POST"])
 def saveAssignment(user):
     data = json.loads(request.data.decode("utf-8"))
-    form_id = data.get("id")
     title = data.get("title")
     qna = data.get("qna")
     class_code = data.get("class_code")
 
-    if form_id is None or title is None or class_code is None:
-        return Response('{"error":"Empty ID or Title or Class Code."}', status=400)
+    if title is None or class_code is None:
+        return Response('{"error":"Empty Title or Class Code."}', status=400)
 
-    if not getClassCodeFromUser(user).__contains__(user):
+    if not getClassCodeFromTeacher(user).__contains__(user):
         return Response('{"error":"Class does not exist"}', status=401)
 
     assignment_form = AssignmentForm.AssignmentForm()
-    assignment_form.id = form_id
+    assignment_form.id = uuid.uuid4().hex
     assignment_form.title = title
     assignment_form.qna = qna
 
-    to_save = Path(os.getcwd()).joinpath("assignment").joinpath("template").joinpath(form_id)
+    to_save = Path(os.getcwd()).joinpath("assignment").joinpath(class_code).joinpath(assignment_form.id)
 
     with open(to_save, "w+") as f:
         f.write(str(assignment_form))
         f.close()
 
-    return Response(status=200)
+    return Response(assignment_form.id, status=200)
 
 
 @app.route('/teacher/class/create', methods=["POST"])
 @verifyTeacherAuth
 def addClass(user):
-
     data = json.loads(request.data.decode("utf-8"))
     class_code = data.get("class_code")
     class_name = data.get("class_name")
@@ -198,7 +269,7 @@ def removeClass(user):
     if class_code is None:
         return Response('{"error":"Empty class code"', status=400)
 
-    if not getClassCodeFromUser(user).__contains__(class_code):
+    if not getClassCodeFromTeacher(user).__contains__(class_code):
         return Response('"error":"Class code not found"', status=404)
 
     with mydb_pool.get_connection() as mydb:
@@ -207,6 +278,12 @@ def removeClass(user):
         mydb.commit()
         cur.close()
         return Response(status=200)
+
+
+@app.route('/teacher/class/list', methods=["GET"])
+@verifyTeacherAuth
+def listClassTeacher(user):
+    return getClassCodeFromTeacher(user)
 
 
 @app.route('/ping')
