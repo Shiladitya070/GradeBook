@@ -20,8 +20,5 @@ class AssignmentForm:
         self.title = data["title"]
         self.qna = data["qna"]
 
-    def addQNA(self, question, answer):
-        self.qna[question] = answer
-
     def __str__(self):
         return json.dumps({"id": self.id, "title": self.title, "qna": self.qna})

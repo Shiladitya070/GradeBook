@@ -1,13 +1,21 @@
 'use client'
+import axios from 'axios';
 import React, { useState } from 'react'
 import toast from 'react-hot-toast';
+import { backend_url } from '../../config'
+import { useCookies } from 'react-cookie';
+
 
 function CreateClass() {
     const [className, setclassName] = useState("")
-
-    const handleSubmit = (e) => {
+    const [cookies, setCookie, removeCookie] = useCookies();
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        toast.success('class created successfully')
+        const res = await axios.post(`${backend_url}/teacher/class/create`, { class_name: className, headers: { Authorization: `${cookies.auth}` } })
+        if (res.status === 200) {
+            console.log(res.data)
+            toast.success('class created successfully')
+        }
     }
 
     return (

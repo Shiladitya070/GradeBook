@@ -66,7 +66,7 @@ const ClassPage = () => {
                         <div>
                             <p className="font-semibold text-indigo-600">
                                 <a
-                                    href={`/class/${classId}/assignment/${assignment.id}`}
+                                    href={`/class/asg/${assignment.id}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="hover:underline"
