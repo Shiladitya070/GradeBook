@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 from functools import partial, wraps
 import uuid
+#from SimilarScore import SimilarScore
+import threading
+import sys
+import pymongo
 
 with open("config.json", "r") as file:
     config = json.load(file)
@@ -21,6 +25,15 @@ STUDENT = "student"
 mydb_pool = mysql.connector.pooling.MySQLConnectionPool(pool_name="pool", pool_size=25, host="localhost",
                                                         username=config["dbuser"],
                                                         password=config["dbpswd"], database="gradebook")
+try:
+    client = pymongo.MongoClient(
+        f"mongodb+srv://chetanMongoUser:{config['mongopswd']}@cluster0.6d6fbfi.mongodb.net/?retryWrites=true&w=majority")
+except pymongo.errors.ConfigurationError:
+    print("Could not connect")
+    sys.exit(1)
+
+mongo_db = client["gradebook"]
+assignments_collection = mongo_db["assignments"]
 
 
 def genToken() -> str:
@@ -51,7 +64,7 @@ def getUserFromToken(token) -> str | bool:
 
 def getRoleFromUser(user) -> str | bool:
     with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
+        cur = mydb.cursor(buffered=True)
         cur.execute("SELECT role FROM userbase WHERE username=%s", (user,))
         row = cur.fetchone()
         cur.close()
@@ -115,7 +128,7 @@ def verifyRoleAuth(func, role_to_check):
         if not user or role != role_to_check:
             return Response('{"error":"Bad creds"}', status=401)
 
-        func(user, *args, **kwargs)
+        return func(user, *args, **kwargs)
 
     return wrapper
 
@@ -221,32 +234,56 @@ def specificPending(user, class_code):
     return jsonify(all_pending)
 
 
+# TODO - remmeber to finish this
+@app.route('/student/assignment/submit')
+def submitAssignment():
+    pass
+
+
 # TODO - assign to that students
 @app.route('/teacher/assignment/create', methods=["POST"])
+@verifyTeacherAuth
 def saveAssignment(user):
     data = json.loads(request.data.decode("utf-8"))
     title = data.get("title")
-    qna = data.get("qna")
     class_code = data.get("class_code")
 
     if title is None or class_code is None:
         return Response('{"error":"Empty Title or Class Code."}', status=400)
 
-    if not getClassCodeFromTeacher(user).__contains__(user):
-        return Response('{"error":"Class does not exist"}', status=401)
+    # FIXME - test this
+    #if not getClassCodeFromTeacher(user).__contains__(user):
+    #    return Response('{"error":"Class does not exist"}', status=401)
 
     assignment_form = AssignmentForm.AssignmentForm()
     assignment_form.id = uuid.uuid4().hex
     assignment_form.title = title
-    assignment_form.qna = qna
 
-    to_save = Path(os.getcwd()).joinpath("assignment").joinpath(class_code).joinpath(assignment_form.id)
+    global assignments_collection
+    assignments_collection.insert_one({assignment_form.id: json.loads(str(assignment_form))})
 
-    with open(to_save, "w+") as f:
+    return Response(assignment_form.id, status=200)
+
+
+# TODO - do add to check class
+@app.route('/teacher/assignment/update', methods=["POST"])
+@verifyTeacherAuth
+def updateAssignment():
+    data = json.loads(request.data.decode("utf-8"))
+    qna = data.get("qna")
+    class_code = data.get("class_code")
+    assignment_id = data.get("assignment_id")
+
+    to_update = Path(os.getcwd()).joinpath("assignment").joinpath(class_code).joinpath(assignment_id)
+
+    with open(to_update, "w+") as f:
+        assignment_form = AssignmentForm.AssignmentForm()
+        assignment_form.parse(f.read())
+        assignment_form.qna = json.loads(qna)
         f.write(str(assignment_form))
         f.close()
 
-    return Response(assignment_form.id, status=200)
+    return Response(status=200)
 
 
 @app.route('/teacher/class/create', methods=["POST"])

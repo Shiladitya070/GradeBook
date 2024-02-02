@@ -1,4 +1,6 @@
 {
   "dbuser": "root",
-  "dbpswd": "cHetan123##"
+  "dbpswd": "cHetan123##",
+  "mongouser": "chetanMongoUser",
+  "mongopswd": "vSUmvWUbDoV3UkZ0"
 }
