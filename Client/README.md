@@ -1,2 +1,0 @@
-# GradeBook
-    - for frontend
