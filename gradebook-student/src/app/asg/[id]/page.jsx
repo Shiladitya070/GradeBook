@@ -7,28 +7,36 @@ const viewAsg = () => {
     const { id } = useParams();
     const [asg, setAsg] = useState();
     const [loading, setLoading] = useState(true);
-    const [formData, setForm] = useState({});
-    const handleInputChange = (index, event) => {
-        const { name, value } = event.target;
-        const list = [...formData];
-        list[index][name] = value;
-        setFormData(list);
+    const [formData, setFormData] = useState([]);
+
+    const handleInputChange = (id, event) => {
+        const { value } = event.target;
+        const updatedFormData = formData.map(item => {
+            if (item.questionId === id) {
+                return { ...item, answer: value };
+            }
+            return item;
+        });
+
+        const existingQuestionIndex = formData.findIndex(item => item.questionId === id);
+        if (existingQuestionIndex === -1) {
+            // If the questionId doesn't exist in the formData, add it
+            setFormData([...formData, { questionId: id, answer: value }]);
+        } else {
+            // If the questionId already exists, update its answer
+            setFormData(updatedFormData);
+        }
+
     };
+    console.log(formData)
     const handleSubmit = async event => {
         event.preventDefault();
-        console.log("Form Data", formData);
+        const dataSend = { assigmentsId: id, questions: formData }
+        console.log("Form Data", dataSend);
+        axios.post(`/api/submission`, dataSend)
+            .then(res => { console.log(res.data); })
+            .catch(err => console.log(err));
 
-        const dataToSend = {
-            id: asg.id, // Assuming asg.id is defined elsewhere
-            className: asg.className,
-            dueDate: asg.dueDate,
-            title: asg.title,
-            questions: formData.map(({ question }) => ({ question })), // Extracting only the question field
-        };
-
-        console.log("Data to send", dataToSend);
-
-        // Make your API call here to send dataToSend to the server
     };
 
     useEffect(() => {
@@ -70,12 +78,17 @@ const viewAsg = () => {
                                     id={`answer-${index}`}
                                     name={`answer-${index}`}
                                     placeholder="Enter answer"
-                                    // value={question.answer}
-                                    // onChange={e => handleAnswerChange(index, e)} // Add the corresponding function for handling answer changes
+                                    // value={formData.answer}
+                                    onChange={(e) => handleInputChange(question.id, e)} // Add the corresponding function for handling answer changes
                                     className="w-full px-4 py-2 mt-2 border border-gray-300 rounded-md focus:outline-none focus:border-indigo-500"
                                 ></textarea>
                             </div>
                         ))}
+                        <button
+                            type="submit"
+                            className="w-full px-4 py-2 mt-2 text-lg text-white bg-indigo-500 rounded-md hover:bg-indigo-400">
+                            submit
+                        </button>
                     </form>
                 </>
             )}

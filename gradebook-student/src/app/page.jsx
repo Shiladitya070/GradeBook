@@ -5,6 +5,7 @@ export default function Home() {
     <main className="flex min-h-screen flex-col p-24">
       <h1>Student</h1>
       <Link className="bg-red-400 p-4" href="/asg" >Asg</Link>
+      <Link className="bg-red-400 p-4" href="/viewSubmisson" >Subssion</Link>
     </main>
   );
 }
