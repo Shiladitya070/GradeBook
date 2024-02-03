@@ -1,19 +1,20 @@
 from flask import Flask, request, make_response, Response, jsonify
 from flask_cors import CORS
-import mysql.connector
 import json
 import secrets
 import AssignmentForm
-import os
-from pathlib import Path
 from functools import partial, wraps
 import uuid
-# from SimilarScore import SimilarScore
+from SimilarScore import SimilarScore
 from ClassObject import ClassObject
 from StudentModel import StudentModel
+from UserModel import UserModel
 import threading
 import sys
 import pymongo
+import pymongo.errors
+import schedule
+import time
 
 with open("config.json", "r") as file:
     config = json.load(file)
@@ -24,9 +25,6 @@ app.secret_key = "A_SECRET_KEY"
 TEACHER = "teacher"
 STUDENT = "student"
 
-mydb_pool = mysql.connector.pooling.MySQLConnectionPool(pool_name="pool", pool_size=25, host="localhost",
-                                                        username=config["dbuser"],
-                                                        password=config["dbpswd"], database="gradebook")
 try:
     client = pymongo.MongoClient(
         f"mongodb+srv://chetanMongoUser:{config['mongopswd']}@cluster0.6d6fbfi.mongodb.net/?retryWrites=true&w=majority")
@@ -39,6 +37,7 @@ assignments_collection = mongo_db["assignments"]
 submissions_collection = mongo_db["submissions"]
 class_collection = mongo_db["class"]
 students_collection = mongo_db["students"]
+userbase_collection = mongo_db["userbase"]
 
 
 def genToken() -> str:
@@ -46,40 +45,30 @@ def genToken() -> str:
 
 
 def saveToken(user, token) -> None:
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("INSERT INTO tokens (user,token) VALUES (%s,%s)", (user, token))
-        mydb.commit()
-        cur.close()
+    global userbase_collection
+    userbase_collection.update_one(
+        {"username": user},
+        {"tokens": userbase_collection.find_one({"username": user}).get("tokens").append(token)})
 
 
 def getUserFromToken(token) -> str | bool:
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("SELECT user FROM tokens WHERE token = %s", (token,))
-        row = cur.fetchone()
-        cur.close()
-
-        if row is None:
-            return False
-
-        result = row[0]
-        return result
+    global userbase_collection
+    result = userbase_collection.find_one({"tokens": token})
+    print(result)
+    print(type(result))
+    if result is None:
+        return False
+    else:
+        return result.get("username")
 
 
 def getRoleFromUser(user) -> str | bool:
-    if user is None:
+    global userbase_collection
+    result = userbase_collection.find_one({"username": user})
+    if result is None:
         return False
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor(buffered=True)
-        cur.execute("SELECT role FROM userbase WHERE username=%s", (user,))
-        row = cur.fetchone()
-        cur.close()
-
-        if row is None:
-            return False
-
-        return row[0]
+    else:
+        return result.get("role")
 
 
 def getClassCodeFromTeacher(user) -> list | bool:
@@ -113,10 +102,16 @@ def getAssignmentsDoneByStudent(student) -> list:
 def verifyRoleAuth(func, role_to_check):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        user = getUserFromToken(request.headers.get('Authorization'))
+        auth_header = request.headers.get('Authorization')
+        if auth_header is None:
+            return Response('{"error":"No header"}',status=401)
+        user = getUserFromToken(auth_header)
+        if not user:
+            return Response('{"error":"Bad creds"}', status=401)
+
         role = getRoleFromUser(user)
 
-        if not user or role != role_to_check:
+        if role != role_to_check:
             return Response('{"error":"Bad creds"}', status=401)
 
         return func(user, *args, **kwargs)
@@ -128,6 +123,29 @@ verifyTeacherAuth = partial(verifyRoleAuth, role_to_check=TEACHER)
 verifyStudentAuth = partial(verifyRoleAuth, role_to_check=STUDENT)
 
 
+def run_ctns(interval=10):
+    cease_ctns_run = threading.Event()
+
+    class ScheduleThread(threading.Thread):
+        @classmethod
+        def run(cls):
+            while not cease_ctns_run.is_set():
+                schedule.run_pending()
+                time.sleep(interval)
+
+    continuous_thread = ScheduleThread()
+    continuous_thread.start()
+    return cease_ctns_run
+
+
+def gradeAssignment():
+    # TODO - get the submit text
+    sample_answer = ""
+    student_answer = ""
+    grade_point = SimilarScore([sample_answer, student_answer]).similarity()
+    # TODO - set the grade_point in db
+
+
 @app.route('/cred/verify', methods=["POST"])
 def verifyLogin():
     data = json.loads(request.data.decode('utf-8'))
@@ -135,24 +153,13 @@ def verifyLogin():
     password = data.get("password")
     role = getRoleFromUser(username)
 
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("SELECT password FROM userbase WHERE username=%s and role=%s", (username, role))
-
-        raw_data = cur.fetchone()
-
-        if raw_data is None:
-            return Response(status=401)
-
-        current_password = raw_data[0]
-        if current_password == password:
-            token = genToken()
-            saveToken(username, token)
-
-            resp = make_response(token)
-            return resp
-        else:
-            return Response(status=401)
+    global userbase_collection
+    if userbase_collection.find_one({"username": username, "password": password, "role": role}) is None:
+        return Response('{"error":"Bad creds', status=401)
+    else:
+        token = genToken()
+        saveToken(username, token)
+        return make_response(token)
 
 
 @app.route('/register', methods=["POST"])
@@ -165,23 +172,20 @@ def registerUser():
     if username is None or password is None:
         return Response('{"error":"Username or password is required"}', status=400)
 
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("SELECT * FROM userbase WHERE username=%s", (username,))
-        raw_data = cur.fetchone()
+    global userbase_collection
+    if userbase_collection.find_one({"username": username}) is not None:
+        return Response('{"error":"Username is taken"}', status=400)
 
-        if raw_data is not None:
-            return Response('{"error":"Username is not unique."}', status=400)
+    user_model = UserModel()
+    token = genToken()
+    user_model.username = username
+    user_model.password = password
+    user_model.role = role
+    user_model.tokens = [token]
+    userbase_collection.insert_one(user_model.__dict__)
 
-        cur.execute("INSERT INTO userbase (username, password,role) VALUES (%s, %s, %s)", (username, password, role))
-        mydb.commit()
-        cur.close()
-
-        token = genToken()
-        saveToken(username, token)
-
-        resp = make_response(token)
-        return resp
+    resp = make_response(token)
+    return resp
 
 
 @app.route('/profile')
@@ -227,8 +231,13 @@ def specificPending(user, class_code):
 
 # TODO - remmeber to finish this
 @app.route('/student/assignment/submit')
+@verifyStudentAuth
 def submitAssignment():
-    pass
+    data = json.loads(request.data.decode("utf-8"))
+    assignment_id = data["assignment_id"]
+
+    global submissions_collection
+    raise NotImplementedError
 
 
 # TODO - assign to that students
@@ -307,7 +316,7 @@ def removeClass(user):
         return Response('"error":"Class code not found"', status=404)
 
     global class_collection
-    class_collection.delete_one({"classCode":class_code})
+    class_collection.delete_one({"classCode": class_code})
     return Response(status=200)
 
 

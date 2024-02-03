@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useCookies } from "react-cookie";
 import toast from "react-hot-toast";
 import { backend_url } from "../../../config";
+import Link from "next/link";
 
 
 const LoginPage = () => {
@@ -28,7 +29,7 @@ const LoginPage = () => {
                 if (!res.data) {
                     setCookie("auth", res.data, { path: "/" });
                 }
-                router.push("/dasboard")
+                router.push("/")
             }
         } catch (error) {
             console.log(error)
@@ -73,12 +74,12 @@ const LoginPage = () => {
                         >
                             Sign In
                         </button>
-                        <a
+                        <Link
                             className="inline-block align-baseline font-bold text-sm text-blue-500 hover:text-blue-800"
-                            href="#"
+                            href={"/signup"}
                         >
-                            Forgot Password?
-                        </a>
+                            Register here
+                        </Link>
                     </div>
                 </form>
             </div>
