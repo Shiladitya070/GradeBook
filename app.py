@@ -8,7 +8,9 @@ import os
 from pathlib import Path
 from functools import partial, wraps
 import uuid
-#from SimilarScore import SimilarScore
+# from SimilarScore import SimilarScore
+from ClassObject import ClassObject
+from StudentModel import StudentModel
 import threading
 import sys
 import pymongo
@@ -34,6 +36,9 @@ except pymongo.errors.ConfigurationError:
 
 mongo_db = client["gradebook"]
 assignments_collection = mongo_db["assignments"]
+submissions_collection = mongo_db["submissions"]
+class_collection = mongo_db["class"]
+students_collection = mongo_db["students"]
 
 
 def genToken() -> str:
@@ -63,6 +68,8 @@ def getUserFromToken(token) -> str | bool:
 
 
 def getRoleFromUser(user) -> str | bool:
+    if user is None:
+        return False
     with mydb_pool.get_connection() as mydb:
         cur = mydb.cursor(buffered=True)
         cur.execute("SELECT role FROM userbase WHERE username=%s", (user,))
@@ -76,47 +83,31 @@ def getRoleFromUser(user) -> str | bool:
 
 
 def getClassCodeFromTeacher(user) -> list | bool:
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("SELECT classCode FROM classownership WHERE teacher=%s", (user,))
-        row = cur.fetchall()
+    if user is None:
+        return False
 
-        if row is None:
-            return False
-
-        return row
+    global class_collection
+    class_list = []
+    for classObj in class_collection.find({"owner": user}):
+        class_list.append(classObj["classCode"])
 
 
 def getClassCodeFromStudent(user) -> list | bool:
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("SELECT classCode FROM classjoined WHERE user=%s", (user,))
-        row = cur.fetchall()
+    if user is None:
+        return False
 
-        if row is None:
-            return False
-
-        return row
+    global students_collection
+    return students_collection.find_one({"username": user}).get("classJoined")
 
 
 def getAssignmentsFromClass(code) -> list:
-    to_return = []
-
-    for element in Path(os.getcwd()).joinpath("assignment").joinpath(code).iterdir():
-        if element.is_file():
-            to_return.append(element.name)
-
-    return to_return
+    global class_collection
+    return class_collection.find_one({"classCode": code}).get("assignments")
 
 
 def getAssignmentsDoneByStudent(student) -> list:
-    to_return = []
-
-    for element in Path(os.getcwd()).joinpath("submission").joinpath(student).iterdir():
-        if element.is_file():
-            to_return.append(element.name)
-
-    return to_return
+    global students_collection
+    return students_collection.find_one({"username": student}).get("assignmentsSubmitted")
 
 
 def verifyRoleAuth(func, role_to_check):
@@ -251,9 +242,8 @@ def saveAssignment(user):
     if title is None or class_code is None:
         return Response('{"error":"Empty Title or Class Code."}', status=400)
 
-    # FIXME - test this
-    #if not getClassCodeFromTeacher(user).__contains__(user):
-    #    return Response('{"error":"Class does not exist"}', status=401)
+    if not (class_code in getClassCodeFromTeacher(user)):
+        return Response('{"error":"Class does not exist"}', status=401)
 
     assignment_form = AssignmentForm.AssignmentForm()
     assignment_form.id = uuid.uuid4().hex
@@ -268,20 +258,19 @@ def saveAssignment(user):
 # TODO - do add to check class
 @app.route('/teacher/assignment/update', methods=["POST"])
 @verifyTeacherAuth
-def updateAssignment():
+def updateAssignment(user):
     data = json.loads(request.data.decode("utf-8"))
     qna = data.get("qna")
-    class_code = data.get("class_code")
     assignment_id = data.get("assignment_id")
+    global assignments_collection
+    class_code = assignments_collection.find_one({"id": assignment_id}).get("classCode")
 
-    to_update = Path(os.getcwd()).joinpath("assignment").joinpath(class_code).joinpath(assignment_id)
+    if not (class_code in getClassCodeFromTeacher(user)):
+        return Response('{"error":"Class does not exist"}', status=401)
 
-    with open(to_update, "w+") as f:
-        assignment_form = AssignmentForm.AssignmentForm()
-        assignment_form.parse(f.read())
-        assignment_form.qna = json.loads(qna)
-        f.write(str(assignment_form))
-        f.close()
+    assignments_collection.update_one(
+        {"id": assignment_id},
+        {"$set": {"qna": qna}})
 
     return Response(status=200)
 
@@ -296,13 +285,13 @@ def addClass(user):
     if class_name is None:
         return Response('{"error":"Empty class name"', status=400)
 
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("INSERT INTO classownership (teacher, classCode,className) VALUES (%s,%s,%s)",
-                    (user, class_code, class_name))
-        mydb.commit()
-        cur.close()
-        return Response(class_code, status=200)
+    global class_collection
+    class_obj = ClassObject()
+    class_obj.classCode = class_code
+    class_obj.name = class_name
+    class_obj.owner = user
+    class_collection.insert_one(class_obj.__dict__)
+    return Response(class_code, status=200)
 
 
 @app.route('/teacher/class/delete', methods=["POST"])
@@ -314,15 +303,12 @@ def removeClass(user):
     if class_code is None:
         return Response('{"error":"Empty class code"', status=400)
 
-    if not getClassCodeFromTeacher(user).__contains__(class_code):
+    if not (class_code in getClassCodeFromTeacher(user)):
         return Response('"error":"Class code not found"', status=404)
 
-    with mydb_pool.get_connection() as mydb:
-        cur = mydb.cursor()
-        cur.execute("DELETE FROM classownership WHERE classCode=%s", (class_code,))
-        mydb.commit()
-        cur.close()
-        return Response(status=200)
+    global class_collection
+    class_collection.delete_one({"classCode":class_code})
+    return Response(status=200)
 
 
 @app.route('/teacher/class/list', methods=["GET"])
